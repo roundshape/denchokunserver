@@ -20,6 +20,54 @@ var (
 	basePath      string
 )
 
+// GetBasePath returns the base path for data storage
+func GetBasePath() string {
+	return basePath
+}
+
+// ClosePeriodDB closes database connection for a specific period
+func ClosePeriodDB(period string) error {
+	dbMutex.Lock()
+	defer dbMutex.Unlock()
+
+	if db, exists := dbConnections[period]; exists {
+		err := db.Close()
+		delete(dbConnections, period)
+		
+		// If this was the current period, reset current connection
+		if currentPeriod == period {
+			currentDB = nil
+			currentPeriod = ""
+		}
+		
+		return err
+	}
+	
+	return nil // No connection to close
+}
+
+// CloseAllPeriodDBs closes all database connections
+func CloseAllPeriodDBs() error {
+	dbMutex.Lock()
+	defer dbMutex.Unlock()
+
+	var lastErr error
+	
+	// Close all period database connections
+	for period, db := range dbConnections {
+		if err := db.Close(); err != nil {
+			lastErr = err
+		}
+		delete(dbConnections, period)
+	}
+	
+	// Reset current connection
+	currentDB = nil
+	currentPeriod = ""
+	
+	return lastErr
+}
+
 func InitDB(path string) error {
 	basePath = path
 	dbConnections = make(map[string]*sql.DB)
@@ -74,6 +122,7 @@ func GetSystemDB() (*sql.DB, error) {
 }
 
 func ConnectToPeriod(period string) error {
+	
 	dbMutex.Lock()
 	defer dbMutex.Unlock()
 

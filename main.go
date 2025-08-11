@@ -82,6 +82,7 @@ func main() {
 
 		api.GET("/periods", handlers.GetPeriods)
 		api.POST("/periods", handlers.CreatePeriod)
+		api.PUT("/periods", handlers.UpdatePeriods)
 		api.GET("/periods/:period", handlers.GetPeriod)
 		api.PUT("/periods/:period", handlers.UpdatePeriod)
 		api.DELETE("/periods/:period", handlers.DeletePeriod)

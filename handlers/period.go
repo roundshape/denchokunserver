@@ -126,10 +126,10 @@ func CreatePeriod(c *gin.Context) {
 	})
 }
 
-// UpdatePeriod updates an existing period
+// UpdatePeriod updates a specific period (name and/or dates)
 func UpdatePeriod(c *gin.Context) {
-	periodName := c.Param("period")
-	if periodName == "" {
+	oldName := c.Param("period")
+	if oldName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"error":   "invalid_request",
@@ -138,7 +138,7 @@ func UpdatePeriod(c *gin.Context) {
 		return
 	}
 
-	var req models.PeriodRequest
+	var req models.PeriodUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -148,12 +148,18 @@ func UpdatePeriod(c *gin.Context) {
 		return
 	}
 
-	period, err := models.UpdatePeriod(periodName, &req)
+	period, err := models.UpdatePeriod(oldName, &req)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
 				"error":   "period_not_found",
+				"message": err.Error(),
+			})
+		} else if strings.Contains(err.Error(), "already exists") {
+			c.JSON(http.StatusConflict, gin.H{
+				"success": false,
+				"error":   "period_already_exists",
 				"message": err.Error(),
 			})
 		} else if strings.Contains(err.Error(), "format") || strings.Contains(err.Error(), "range") {
@@ -165,7 +171,7 @@ func UpdatePeriod(c *gin.Context) {
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
-				"error":   "database_error",
+				"error":   "update_error",
 				"message": err.Error(),
 			})
 		}
@@ -176,6 +182,33 @@ func UpdatePeriod(c *gin.Context) {
 		"success": true,
 		"message": "Period updated successfully",
 		"period":  period,
+	})
+}
+
+// UpdatePeriods synchronizes periods with directories
+func UpdatePeriods(c *gin.Context) {
+	periods, err := models.UpdatePeriods()
+	if err != nil {
+		if strings.Contains(err.Error(), "periods without directories") {
+			c.JSON(http.StatusConflict, gin.H{
+				"success": false,
+				"error":   "periods_without_directories",
+				"message": err.Error(),
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"error":   "sync_error",
+				"message": err.Error(),
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Periods synchronized successfully",
+		"periods": periods,
 	})
 }
 
