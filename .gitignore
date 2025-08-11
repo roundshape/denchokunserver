@@ -88,3 +88,7 @@ test*.json
 # Build artifacts
 build/
 dist/
+
+# Windows special files
+nul
+**/nul
