@@ -24,9 +24,12 @@ type PeriodRequest struct {
 }
 
 type PeriodUpdateRequest struct {
-	NewName  string `json:"newName" binding:"required"`
 	FromDate string `json:"fromDate,omitempty"`
 	ToDate   string `json:"toDate,omitempty"`
+}
+
+type PeriodRenameRequest struct {
+	NewName string `json:"newName" binding:"required"`
 }
 
 // GetAllPeriodsWithDetails returns all periods with their details
@@ -201,18 +204,10 @@ func UpdatePeriods() ([]Period, error) {
 
 }
 
-// UpdatePeriod updates a period name and optionally dates
-func UpdatePeriod(oldName string, req *PeriodUpdateRequest) (*Period, error) {
-	// Validate new name format
-	if req.NewName != "" {
-		nameRegex := regexp.MustCompile(`^\d{4}-\d{2}$`)
-		if !nameRegex.MatchString(req.NewName) {
-			return nil, fmt.Errorf("new period name should follow YYYY-MM format (e.g., 2024-01)")
-		}
-	}
-
+// UpdatePeriod updates period dates only
+func UpdatePeriod(periodName string, req *PeriodUpdateRequest) (*Period, error) {
 	// Get existing period
-	existing, err := GetPeriodByName(oldName)
+	existing, err := GetPeriodByName(periodName)
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +217,44 @@ func UpdatePeriod(oldName string, req *PeriodUpdateRequest) (*Period, error) {
 		if err := ValidateDateRange(req.FromDate, req.ToDate); err != nil {
 			return nil, err
 		}
+	}
+
+	// Update dates if provided
+	if req.FromDate != "" {
+		existing.FromDate = req.FromDate
+	}
+	if req.ToDate != "" {
+		existing.ToDate = req.ToDate
+	}
+	existing.Updated = time.Now().Format(time.RFC3339)
+
+	// Update in database
+	db, err := GetSystemDB()
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(`UPDATE Periods SET fromDate = ?, toDate = ?, updated = ? WHERE name = ?`,
+		existing.FromDate, existing.ToDate, existing.Updated, periodName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update period: %v", err)
+	}
+
+	return existing, nil
+}
+
+// RenamePeriod renames a period (changes its name and directory)
+func RenamePeriod(oldName string, newName string) (*Period, error) {
+	// Validate new name format
+	nameRegex := regexp.MustCompile(`^\d{4}-\d{2}$`)
+	if !nameRegex.MatchString(newName) {
+		return nil, fmt.Errorf("new period name should follow YYYY-MM format (e.g., 2024-01)")
+	}
+
+	// Get existing period
+	existing, err := GetPeriodByName(oldName)
+	if err != nil {
+		return nil, err
 	}
 
 	// Start transaction
@@ -236,62 +269,41 @@ func UpdatePeriod(oldName string, req *PeriodUpdateRequest) (*Period, error) {
 	}
 	defer tx.Rollback()
 
-	// Update period name if changed
-	needsRename := req.NewName != "" && req.NewName != oldName
-	if needsRename {
-		// Check if new name already exists
-		var count int
-		err = tx.QueryRow("SELECT COUNT(*) FROM Periods WHERE name = ?", req.NewName).Scan(&count)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check new name: %v", err)
-		}
-		if count > 0 {
-			return nil, fmt.Errorf("period %s already exists", req.NewName)
-		}
-
-		// Rename directory
-		oldPath := filepath.Join(GetBasePath(), oldName)
-		newPath := filepath.Join(GetBasePath(), req.NewName)
-		
-		if _, err := os.Stat(oldPath); err == nil {
-			if err := os.Rename(oldPath, newPath); err != nil {
-				return nil, fmt.Errorf("failed to rename directory: %v", err)
-			}
-		}
-		
-		existing.Name = req.NewName
+	// Check if new name already exists
+	var count int
+	err = tx.QueryRow("SELECT COUNT(*) FROM Periods WHERE name = ?", newName).Scan(&count)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check new name: %v", err)
+	}
+	if count > 0 {
+		return nil, fmt.Errorf("period %s already exists", newName)
 	}
 
-	// Update dates if provided
-	if req.FromDate != "" {
-		existing.FromDate = req.FromDate
+	// Rename directory
+	oldPath := filepath.Join(GetBasePath(), oldName)
+	newPath := filepath.Join(GetBasePath(), newName)
+	
+	if _, err := os.Stat(oldPath); err == nil {
+		if err := os.Rename(oldPath, newPath); err != nil {
+			return nil, fmt.Errorf("failed to rename directory: %v", err)
+		}
 	}
-	if req.ToDate != "" {
-		existing.ToDate = req.ToDate
-	}
+
+	// Update period record
+	existing.Name = newName
 	existing.Updated = time.Now().Format(time.RFC3339)
 
-	// Update in database
-	if needsRename {
-		// Delete old record and insert new one (since name is primary key)
-		_, err = tx.Exec("DELETE FROM Periods WHERE name = ?", oldName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to delete old period: %v", err)
-		}
+	// Delete old record and insert new one (since name is primary key)
+	_, err = tx.Exec("DELETE FROM Periods WHERE name = ?", oldName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete old period: %v", err)
+	}
 
-		_, err = tx.Exec(`INSERT INTO Periods (name, fromDate, toDate, created, updated) 
-						  VALUES (?, ?, ?, ?, ?)`,
-			existing.Name, existing.FromDate, existing.ToDate, existing.Created, existing.Updated)
-		if err != nil {
-			return nil, fmt.Errorf("failed to insert new period: %v", err)
-		}
-	} else {
-		// Just update dates
-		_, err = tx.Exec(`UPDATE Periods SET fromDate = ?, toDate = ?, updated = ? WHERE name = ?`,
-			existing.FromDate, existing.ToDate, existing.Updated, oldName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to update period: %v", err)
-		}
+	_, err = tx.Exec(`INSERT INTO Periods (name, fromDate, toDate, created, updated) 
+					  VALUES (?, ?, ?, ?, ?)`,
+		existing.Name, existing.FromDate, existing.ToDate, existing.Created, existing.Updated)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert new period: %v", err)
 	}
 
 	// Commit transaction

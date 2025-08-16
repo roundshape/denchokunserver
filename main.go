@@ -72,6 +72,15 @@ func main() {
 		log.Fatal("Failed to initialize database:", err)
 	}
 
+	// Migrate DealPartners and System tables to System.db if needed
+	log.Println("Checking for table migration to System.db...")
+	if err := models.MigrateToSystemDB(); err != nil {
+		log.Printf("Warning: Table migration failed: %v", err)
+		// Don't fatal error, just log the warning
+	} else {
+		log.Println("Table migration completed successfully")
+	}
+
 	r := gin.Default()
 	r.Use(middleware.CORSMiddleware())
 	r.Use(middleware.ErrorMiddleware())
@@ -82,10 +91,8 @@ func main() {
 
 		api.GET("/periods", handlers.GetPeriods)
 		api.POST("/periods", handlers.CreatePeriod)
-		api.PUT("/periods", handlers.UpdatePeriods)
-		api.GET("/periods/:period", handlers.GetPeriod)
-		api.PUT("/periods/:period", handlers.UpdatePeriod)
-		api.DELETE("/periods/:period", handlers.DeletePeriod)
+		api.PUT("/periods/:period/dates", handlers.UpdatePeriodDates)
+		api.PUT("/periods/:period/name", handlers.UpdatePeriodName)
 		api.POST("/periods/:period/connect", handlers.ConnectPeriod)
 
 		api.POST("/deals", handlers.CreateDeal)
@@ -101,6 +108,11 @@ func main() {
 		api.POST("/deal-partners", handlers.CreateDealPartner)
 		api.PUT("/deal-partners/:name", handlers.UpdateDealPartner)
 		api.DELETE("/deal-partners/:name", handlers.DeleteDealPartner)
+
+		api.GET("/system", handlers.GetSystemInfo)
+		api.PUT("/system", handlers.UpdateSystemInfo)
+
+		api.POST("/query", handlers.ExecuteQuery)
 	}
 
 	log.Printf("Starting server on %s\n", config.Server.Port)

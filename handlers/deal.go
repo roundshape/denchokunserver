@@ -6,7 +6,10 @@ import (
 	"denchokun-api/utils"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -33,17 +36,153 @@ type FileRequest struct {
 }
 
 func CreateDeal(c *gin.Context) {
+	log.Println("CreateDeal: Starting request processing")
+	
+	// Check content type to determine how to parse the request
+	contentType := c.GetHeader("Content-Type")
+	log.Printf("CreateDeal: Content-Type = %s", contentType)
+	
 	var req DealRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   "invalid_request",
-			"message": err.Error(),
-		})
-		return
+	var fileData []byte
+	var fileName string
+	var fileSize int64
+	
+	if strings.Contains(contentType, "multipart/form-data") {
+		log.Println("CreateDeal: Processing multipart/form-data request")
+		// Handle multipart/form-data request
+		form, err := c.MultipartForm()
+		if err != nil {
+			log.Printf("CreateDeal: Failed to parse multipart form: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   "invalid_request",
+				"message": "Failed to parse multipart form",
+			})
+			return
+		}
+		
+		// Parse JSON dealData from form
+		dealDataStr := c.PostForm("dealData")
+		log.Printf("CreateDeal: dealData = %s", dealDataStr)
+		if dealDataStr == "" {
+			log.Println("CreateDeal: dealData is empty")
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   "invalid_request",
+				"message": "dealData is required",
+			})
+			return
+		}
+		
+		// Create a temporary structure for parsing multipart data
+		type MultipartDealData struct {
+			Period      string `json:"period"`
+			DealType    string `json:"DealType"`
+			DealDate    string `json:"DealDate"`
+			DealName    string `json:"DealName"`
+			DealPartner string `json:"DealPartner"`
+			DealPrice   int    `json:"DealPrice"`
+			DealRemark  string `json:"DealRemark"`
+			RecStatus   string `json:"RecStatus"`
+		}
+		
+		var multipartData MultipartDealData
+		if err := json.Unmarshal([]byte(dealDataStr), &multipartData); err != nil {
+			log.Printf("CreateDeal: Failed to unmarshal dealData JSON: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   "invalid_request",
+				"message": "Invalid dealData JSON",
+			})
+			return
+		}
+		log.Printf("CreateDeal: Parsed multipartData: %+v", multipartData)
+		
+		// Convert to DealRequest
+		req.Period = multipartData.Period
+		req.DealData = models.Deal{
+			DealType:    multipartData.DealType,
+			DealDate:    multipartData.DealDate,
+			DealName:    multipartData.DealName,
+			DealPartner: multipartData.DealPartner,
+			DealPrice:   multipartData.DealPrice,
+			DealRemark:  multipartData.DealRemark,
+			RecStatus:   multipartData.RecStatus,
+		}
+		
+		// Handle file upload if present
+		files := form.File["file"]
+		if len(files) > 0 {
+			file := files[0]
+			fileName = file.Filename
+			fileSize = file.Size
+			
+			// Check file size (max 100MB)
+			const maxFileSize = 100 * 1024 * 1024 // 100MB
+			if fileSize > maxFileSize {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"success": false,
+					"error":   "file_too_large",
+					"message": "ファイルサイズが100MBを超えています",
+					"maxSize": maxFileSize,
+				})
+				return
+			}
+			
+			// Read file content
+			f, err := file.Open()
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"success": false,
+					"error":   "file_read_error",
+					"message": "Failed to open uploaded file",
+				})
+				return
+			}
+			defer f.Close()
+			
+			// Use io.ReadAll to read the entire file
+			fileData, err = io.ReadAll(f)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"success": false,
+					"error":   "file_read_error",
+					"message": "Failed to read uploaded file",
+				})
+				return
+			}
+		}
+	} else {
+		// Handle JSON request (existing code)
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"error":   "invalid_request",
+				"message": err.Error(),
+			})
+			return
+		}
+		
+		// If base64 file data is provided in JSON
+		if req.FileData != nil && req.FileData.Base64Data != "" {
+			var err error
+			fileData, err = base64.StdEncoding.DecodeString(req.FileData.Base64Data)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"success": false,
+					"error":   "invalid_file_data",
+					"message": "Failed to decode base64 file data",
+				})
+				return
+			}
+			fileName = req.FileData.Name
+			fileSize = int64(len(fileData))
+		}
 	}
 
+	log.Printf("CreateDeal: Connecting to period: %s", req.Period)
 	if err := models.ConnectToPeriod(req.Period); err != nil {
+		log.Printf("CreateDeal: Failed to connect to period %s: %v", req.Period, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "connection_error",
@@ -52,44 +191,61 @@ func CreateDeal(c *gin.Context) {
 		return
 	}
 
-	if req.DealData.NO == "" {
-		req.DealData.NO = generateDealNumber(c, "")
-	} else {
-		// Check if the deal number already exists
-		existingDeal, err := models.GetDealByID(req.DealData.NO)
-		if err == nil && existingDeal != nil {
-			// If it exists, generate a sequence number
-			req.DealData.NO = generateSequenceNumber(req.DealData.NO)
-		}
+	// Always generate deal number on server side
+	log.Println("CreateDeal: Generating deal number on server")
+	req.DealData.NO = generateDealNumber(c, "")
+	log.Printf("CreateDeal: Generated deal number: %s", req.DealData.NO)
+	
+	// Check if the generated deal number already exists (extremely rare)
+	existingDeal, err := models.GetDealByID(req.DealData.NO)
+	if err == nil && existingDeal != nil {
+		// If it exists, generate a sequence number
+		req.DealData.NO = generateSequenceNumber(req.DealData.NO)
+		log.Printf("CreateDeal: Deal number already exists, generated sequence: %s", req.DealData.NO)
 	}
 
-	if req.FileData != nil && req.FileData.Base64Data != "" {
-		fileData, err := base64.StdEncoding.DecodeString(req.FileData.Base64Data)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"error":   "invalid_file_data",
-				"message": "Failed to decode base64 file data",
-			})
-			return
-		}
-
+	// Process file if present (from either multipart or JSON base64)
+	if len(fileData) > 0 {
+		log.Printf("CreateDeal: Processing file data, size: %d bytes", len(fileData))
+		// Calculate hash
 		hash := sha256.Sum256(fileData)
 		req.DealData.Hash = hex.EncodeToString(hash[:])
+		log.Printf("CreateDeal: File hash calculated: %s", req.DealData.Hash)
 
-		if req.FileData.Path == "" {
-			ext := filepath.Ext(req.FileData.Name)
-			fileName := fmt.Sprintf("%s_%s_%s_%d%s",
+		// Generate file path if not provided
+		var filePath string
+		if req.FileData != nil && req.FileData.Path != "" {
+			filePath = req.FileData.Path
+		} else {
+			ext := filepath.Ext(fileName)
+			generatedFileName := fmt.Sprintf("%s_%s_%s_%d%s",
 				req.DealData.NO,
 				req.DealData.DealDate,
 				strings.ReplaceAll(req.DealData.DealPartner, "/", "_"),
 				req.DealData.DealPrice,
 				ext)
-			req.FileData.Path = fileName
+			filePath = generatedFileName
+		}
+		log.Printf("CreateDeal: Generated file path: %s", filePath)
+
+		// Ensure period directory exists
+		periodDir := filepath.Join(models.GetBasePath(), req.Period)
+		log.Printf("CreateDeal: Creating directory: %s", periodDir)
+		if err := os.MkdirAll(periodDir, 0755); err != nil {
+			log.Printf("CreateDeal: Failed to create directory: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"error":   "directory_create_error",
+				"message": "Failed to create period directory",
+			})
+			return
 		}
 
-		filePath := filepath.Join("./data", req.Period, req.FileData.Path)
-		if err := utils.SaveFileAtomic(filePath, fileData); err != nil {
+		// Save file
+		fullPath := filepath.Join(periodDir, filePath)
+		log.Printf("CreateDeal: Saving file to: %s", fullPath)
+		if err := utils.SaveFileAtomic(fullPath, fileData); err != nil {
+			log.Printf("CreateDeal: Failed to save file: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
 				"error":   "file_save_error",
@@ -98,10 +254,25 @@ func CreateDeal(c *gin.Context) {
 			return
 		}
 
-		req.DealData.FilePath = req.FileData.Path
+		req.DealData.FilePath = filePath
+		log.Println("CreateDeal: File processing completed")
+	} else {
+		log.Println("CreateDeal: No file data to process")
 	}
 
+	// Set timestamps
+	log.Println("CreateDeal: Setting timestamps")
+	now := time.Now().Format("2006-01-02T15:04:05Z")
+	if req.DealData.RegDate == "" {
+		req.DealData.RegDate = now
+	}
+	if req.DealData.RecUpdate == "" {
+		req.DealData.RecUpdate = now
+	}
+
+	log.Printf("CreateDeal: Creating deal in database: %+v", req.DealData)
 	if err := models.CreateDeal(&req.DealData); err != nil {
+		log.Printf("CreateDeal: Database create failed: %v", err)
 		if strings.Contains(err.Error(), "already exists") {
 			c.JSON(http.StatusConflict, gin.H{
 				"success": false,
@@ -119,12 +290,21 @@ func CreateDeal(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success":  true,
-		"message":  "Deal created successfully",
-		"dealId":   req.DealData.NO,
-		"filePath": req.DealData.FilePath,
-	})
+	// Build response
+	response := gin.H{
+		"success": true,
+		"message": "Deal created successfully",
+		"dealNo":  req.DealData.NO,
+	}
+	
+	// Add file information if file was uploaded
+	if req.DealData.FilePath != "" {
+		response["filePath"] = req.DealData.FilePath
+		response["fileSize"] = fileSize
+		response["fileHash"] = req.DealData.Hash
+	}
+	
+	c.JSON(http.StatusOK, response)
 }
 
 func GetDeals(c *gin.Context) {

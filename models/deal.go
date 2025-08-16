@@ -71,13 +71,6 @@ func CreateDeal(deal *Deal) error {
 		return fmt.Errorf("failed to insert deal: %v", err)
 	}
 
-	if deal.DealPartner != "" {
-		_, err = tx.Exec("INSERT OR IGNORE INTO DealPartners (name) VALUES (?)", deal.DealPartner)
-		if err != nil {
-			return fmt.Errorf("failed to update partner master: %v", err)
-		}
-	}
-
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
@@ -230,13 +223,6 @@ func UpdateDeal(dealID string, deal *Deal) error {
 		deal.RecUpdate, deal.RecStatus, deal.FilePath, deal.Hash, dealID)
 	if err != nil {
 		return fmt.Errorf("failed to update deal: %v", err)
-	}
-
-	if deal.DealPartner != "" {
-		_, err = tx.Exec("INSERT OR IGNORE INTO DealPartners (name) VALUES (?)", deal.DealPartner)
-		if err != nil {
-			return fmt.Errorf("failed to update partner master: %v", err)
-		}
 	}
 
 	if err = tx.Commit(); err != nil {

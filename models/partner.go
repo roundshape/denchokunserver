@@ -1,6 +1,7 @@
 package models
 
 import (
+	"database/sql"
 	"fmt"
 )
 
@@ -9,7 +10,7 @@ type DealPartner struct {
 }
 
 func GetDealPartners() ([]string, error) {
-	db, err := GetDB()
+	db, err := GetSystemDB()
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +35,7 @@ func GetDealPartners() ([]string, error) {
 }
 
 func CreateDealPartner(partner *DealPartner) error {
-	db, err := GetDB()
+	db, err := GetSystemDB()
 	if err != nil {
 		return err
 	}
@@ -51,12 +52,13 @@ func CreateDealPartner(partner *DealPartner) error {
 }
 
 func UpdateDealPartner(oldName string, newName string) error {
-	db, err := GetDB()
+	systemDB, err := GetSystemDB()
 	if err != nil {
 		return err
 	}
 
-	tx, err := db.Begin()
+	// Start transaction on System.db
+	tx, err := systemDB.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %v", err)
 	}
@@ -77,41 +79,52 @@ func UpdateDealPartner(oldName string, newName string) error {
 		return fmt.Errorf("failed to update partner: %v", err)
 	}
 
-	_, err = tx.Exec("UPDATE Deals SET DealPartner = ? WHERE DealPartner = ?", newName, oldName)
-	if err != nil {
-		return fmt.Errorf("failed to update deals: %v", err)
-	}
-
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	// Update all period databases that contain deals with this partner
+	if err := updateDealPartnerInAllPeriods(oldName, newName); err != nil {
+		return fmt.Errorf("failed to update deals in period databases: %v", err)
+	}
+
+	return nil
+}
+
+func updateDealPartnerInAllPeriods(oldName, newName string) error {
+	periods, err := GetAvailablePeriods()
+	if err != nil {
+		return err
+	}
+
+	for _, period := range periods {
+		periodDB, err := ConnectPeriodDB(period)
+		if err != nil {
+			continue
+		}
+
+		// Update deals in this period database
+		_, err = periodDB.Exec("UPDATE Deals SET DealPartner = ? WHERE DealPartner = ?", newName, oldName)
+		if err != nil {
+			return fmt.Errorf("failed to update deals in period %s: %v", period, err)
+		}
 	}
 
 	return nil
 }
 
 func DeleteDealPartner(name string) error {
-	db, err := GetDB()
+	// First check if partner is used in any period database
+	if err := checkPartnerUsageInAllPeriods(name); err != nil {
+		return err
+	}
+
+	systemDB, err := GetSystemDB()
 	if err != nil {
 		return err
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to start transaction: %v", err)
-	}
-	defer tx.Rollback()
-
-	var dealCount int
-	err = tx.QueryRow("SELECT COUNT(*) FROM Deals WHERE DealPartner = ?", name).Scan(&dealCount)
-	if err != nil {
-		return fmt.Errorf("failed to check deals: %v", err)
-	}
-
-	if dealCount > 0 {
-		return fmt.Errorf("cannot delete partner with existing deals: %s (has %d deals)", name, dealCount)
-	}
-
-	result, err := tx.Exec("DELETE FROM DealPartners WHERE name = ?", name)
+	result, err := systemDB.Exec("DELETE FROM DealPartners WHERE name = ?", name)
 	if err != nil {
 		return fmt.Errorf("failed to delete partner: %v", err)
 	}
@@ -125,8 +138,30 @@ func DeleteDealPartner(name string) error {
 		return fmt.Errorf("partner not found: %s", name)
 	}
 
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %v", err)
+	return nil
+}
+
+func checkPartnerUsageInAllPeriods(partnerName string) error {
+	periods, err := GetAvailablePeriods()
+	if err != nil {
+		return err
+	}
+
+	for _, period := range periods {
+		periodDB, err := ConnectPeriodDB(period)
+		if err != nil {
+			continue
+		}
+
+		var dealCount int
+		err = periodDB.QueryRow("SELECT COUNT(*) FROM Deals WHERE DealPartner = ?", partnerName).Scan(&dealCount)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("failed to check deals in period %s: %v", period, err)
+		}
+
+		if dealCount > 0 {
+			return fmt.Errorf("cannot delete partner with existing deals: %s (has %d deals in period %s)", partnerName, dealCount, period)
+		}
 	}
 
 	return nil
