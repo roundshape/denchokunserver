@@ -222,6 +222,15 @@ func setupDatabase(db *sql.DB) error {
 			"Hash" TEXT,
 			PRIMARY KEY("NO")
 		)`,
+		`CREATE TABLE IF NOT EXISTS "Period" (
+			"fromDate" TEXT,
+			"toDate" TEXT,
+			"created" TEXT,
+			"updated" TEXT
+		)`,
+		`INSERT INTO Period (fromDate, toDate, created, updated)
+		 SELECT '未設定', '未設定', datetime('now'), datetime('now')
+		 WHERE NOT EXISTS (SELECT 1 FROM Period)`,
 		`CREATE INDEX IF NOT EXISTS idx_Hash ON Deals (Hash)`,
 		`CREATE INDEX IF NOT EXISTS idx_deal_date ON Deals(DealDate)`,
 		`CREATE INDEX IF NOT EXISTS idx_deal_partner ON Deals(DealPartner)`,

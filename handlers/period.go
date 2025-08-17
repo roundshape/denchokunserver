@@ -25,6 +25,41 @@ func GetPeriods(c *gin.Context) {
 	})
 }
 
+func GetPeriod(c *gin.Context) {
+	period := c.Param("period")
+	if period == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "invalid_request",
+			"message": "Period parameter is required",
+		})
+		return
+	}
+
+	periodData, err := models.GetPeriodByName(period)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "failed to connect") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"error":   "not_found",
+				"message": "Period not found: " + period,
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "database_error",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"period":  periodData,
+	})
+}
+
 func ConnectPeriod(c *gin.Context) {
 	period := c.Param("period")
 	if period == "" {

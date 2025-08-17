@@ -81,7 +81,9 @@ func main() {
 		log.Println("Table migration completed successfully")
 	}
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(middleware.LoggingMiddleware())
 	r.Use(middleware.CORSMiddleware())
 	r.Use(middleware.ErrorMiddleware())
 
@@ -90,6 +92,7 @@ func main() {
 		api.GET("/health", handlers.HealthCheck)
 
 		api.GET("/periods", handlers.GetPeriods)
+		api.GET("/periods/:period", handlers.GetPeriod)
 		api.POST("/periods", handlers.CreatePeriod)
 		api.PUT("/periods/:period/dates", handlers.UpdatePeriodDates)
 		api.PUT("/periods/:period/name", handlers.UpdatePeriodName)

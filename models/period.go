@@ -64,18 +64,29 @@ func GetAllPeriodsWithDetails() ([]Period, error) {
 
 // GetPeriodByName returns a specific period by name
 func GetPeriodByName(name string) (*Period, error) {
-	db, err := GetSystemDB()
+	// Connect to the period's database
+	if err := ConnectToPeriod(name); err != nil {
+		return nil, fmt.Errorf("failed to connect to period %s: %v", name, err)
+	}
+	
+	db, err := GetDB()
 	if err != nil {
 		return nil, err
 	}
 
-	query := `SELECT name, fromDate, toDate, created, updated FROM Periods WHERE name = ?`
+	query := `SELECT fromDate, toDate, created, updated FROM Period LIMIT 1`
 	var period Period
+	period.Name = name
 	
-	err = db.QueryRow(query, name).Scan(&period.Name, &period.FromDate, &period.ToDate, &period.Created, &period.Updated)
+	err = db.QueryRow(query).Scan(&period.FromDate, &period.ToDate, &period.Created, &period.Updated)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("period not found: %s", name)
+			// Period table exists but no record, return with defaults
+			period.FromDate = "未設定"
+			period.ToDate = "未設定"
+			period.Created = time.Now().Format(time.RFC3339)
+			period.Updated = time.Now().Format(time.RFC3339)
+			return &period, nil
 		}
 		return nil, fmt.Errorf("failed to get period: %v", err)
 	}
@@ -115,28 +126,35 @@ func CreatePeriod(req *PeriodRequest) (*Period, error) {
 
 // CreatePeriodRecord inserts a period record into the database
 func CreatePeriodRecord(period *Period) error {
-	db, err := GetSystemDB()
+	// Connect to the period's database
+	if err := ConnectToPeriod(period.Name); err != nil {
+		return fmt.Errorf("failed to connect to period %s: %v", period.Name, err)
+	}
+	
+	db, err := GetDB()
 	if err != nil {
 		return err
 	}
 
-	query := `INSERT OR REPLACE INTO Periods (name, fromDate, toDate, created, updated) 
-			  VALUES (?, ?, ?, ?, ?)`
+	// First delete any existing record (should be only one)
+	_, _ = db.Exec(`DELETE FROM Period`)
 	
-	_, err = db.Exec(query, period.Name, period.FromDate, period.ToDate, period.Created, period.Updated)
+	// Insert the period record
+	query := `INSERT INTO Period (fromDate, toDate, created, updated) 
+			  VALUES (?, ?, ?, ?)`
+	
+	_, err = db.Exec(query, period.FromDate, period.ToDate, period.Created, period.Updated)
 	if err != nil {
 		return fmt.Errorf("failed to insert period: %v", err)
 	}
 
-
 	return nil
 }
 
-// UpdatePeriods synchronizes the Periods table with the directories under data/
+// UpdatePeriods synchronizes the Period tables in each Denchokun.db
 // This function:
 // 1. Gets all directories under data/
-// 2. For each directory, if it doesn't exist in Periods table, adds it with "未設定" dates
-// 3. Returns error if a period in the table doesn't have a corresponding directory
+// 2. For each directory with Denchokun.db, ensures Period table has a record
 func UpdatePeriods() ([]Period, error) {
 	// Get all available periods (directories with Denchokun.db)
 	availablePeriods, err := GetAvailablePeriods()
@@ -144,37 +162,14 @@ func UpdatePeriods() ([]Period, error) {
 		return nil, err
 	}
 
-	// Get all periods from database
-	db, err := GetSystemDB()
-	if err != nil {
-		return nil, err
-	}
-
-	query := `SELECT name FROM Periods`
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query periods: %v", err)
-	}
-	defer rows.Close()
-
-	existingPeriods := make(map[string]bool)
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("failed to scan period: %v", err)
-		}
-		existingPeriods[name] = false // false means directory not found yet
-	}
-
-	// Check each directory
+	// Check each directory and ensure Period record exists
 	now := time.Now().Format(time.RFC3339)
 	for _, dirName := range availablePeriods {
-		if _, exists := existingPeriods[dirName]; exists {
-			// Mark as found
-			existingPeriods[dirName] = true
-		} else {
-			// Add new period to database
-			period := &Period{
+		// Try to get period details
+		period, err := GetPeriodByName(dirName)
+		if err != nil || period.Created == "" {
+			// Create default period record if not exists
+			period = &Period{
 				Name:     dirName,
 				FromDate: "未設定",
 				ToDate:   "未設定",
@@ -182,26 +177,14 @@ func UpdatePeriods() ([]Period, error) {
 				Updated:  now,
 			}
 			if err := CreatePeriodRecord(period); err != nil {
-				return nil, fmt.Errorf("failed to add period %s: %v", dirName, err)
+				// Log error but continue
+				fmt.Printf("Warning: failed to create period record for %s: %v\n", dirName, err)
 			}
 		}
 	}
 
-	// Check for periods without directories
-	var missingDirs []string
-	for name, found := range existingPeriods {
-		if !found {
-			missingDirs = append(missingDirs, name)
-		}
-	}
-
-	if len(missingDirs) > 0 {
-		return nil, fmt.Errorf("periods without directories: %v", missingDirs)
-	}
-
 	// Return all periods with details
 	return GetAllPeriodsWithDetails()
-
 }
 
 // UpdatePeriod updates period dates only
@@ -229,13 +212,17 @@ func UpdatePeriod(periodName string, req *PeriodUpdateRequest) (*Period, error) 
 	existing.Updated = time.Now().Format(time.RFC3339)
 
 	// Update in database
-	db, err := GetSystemDB()
+	if err := ConnectToPeriod(periodName); err != nil {
+		return nil, fmt.Errorf("failed to connect to period %s: %v", periodName, err)
+	}
+	
+	db, err := GetDB()
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = db.Exec(`UPDATE Periods SET fromDate = ?, toDate = ?, updated = ? WHERE name = ?`,
-		existing.FromDate, existing.ToDate, existing.Updated, periodName)
+	_, err = db.Exec(`UPDATE Period SET fromDate = ?, toDate = ?, updated = ?`,
+		existing.FromDate, existing.ToDate, existing.Updated)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update period: %v", err)
 	}
@@ -243,12 +230,18 @@ func UpdatePeriod(periodName string, req *PeriodUpdateRequest) (*Period, error) 
 	return existing, nil
 }
 
-// RenamePeriod renames a period (changes its name and directory)
+// RenamePeriod renames a period (changes its directory name)
 func RenamePeriod(oldName string, newName string) (*Period, error) {
 	// Validate new name format
 	nameRegex := regexp.MustCompile(`^\d{4}-\d{2}$`)
 	if !nameRegex.MatchString(newName) {
 		return nil, fmt.Errorf("new period name should follow YYYY-MM format (e.g., 2024-01)")
+	}
+
+	// Check if new name already exists
+	newPath := filepath.Join(GetBasePath(), newName)
+	if _, err := os.Stat(newPath); err == nil {
+		return nil, fmt.Errorf("period %s already exists", newName)
 	}
 
 	// Get existing period
@@ -257,31 +250,8 @@ func RenamePeriod(oldName string, newName string) (*Period, error) {
 		return nil, err
 	}
 
-	// Start transaction
-	db, err := GetSystemDB()
-	if err != nil {
-		return nil, err
-	}
-
-	tx, err := db.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("failed to start transaction: %v", err)
-	}
-	defer tx.Rollback()
-
-	// Check if new name already exists
-	var count int
-	err = tx.QueryRow("SELECT COUNT(*) FROM Periods WHERE name = ?", newName).Scan(&count)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check new name: %v", err)
-	}
-	if count > 0 {
-		return nil, fmt.Errorf("period %s already exists", newName)
-	}
-
 	// Rename directory
 	oldPath := filepath.Join(GetBasePath(), oldName)
-	newPath := filepath.Join(GetBasePath(), newName)
 	
 	if _, err := os.Stat(oldPath); err == nil {
 		if err := os.Rename(oldPath, newPath); err != nil {
@@ -289,27 +259,12 @@ func RenamePeriod(oldName string, newName string) (*Period, error) {
 		}
 	}
 
-	// Update period record
+	// Update period record with new name
 	existing.Name = newName
 	existing.Updated = time.Now().Format(time.RFC3339)
 
-	// Delete old record and insert new one (since name is primary key)
-	_, err = tx.Exec("DELETE FROM Periods WHERE name = ?", oldName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete old period: %v", err)
-	}
-
-	_, err = tx.Exec(`INSERT INTO Periods (name, fromDate, toDate, created, updated) 
-					  VALUES (?, ?, ?, ?, ?)`,
-		existing.Name, existing.FromDate, existing.ToDate, existing.Created, existing.Updated)
-	if err != nil {
-		return nil, fmt.Errorf("failed to insert new period: %v", err)
-	}
-
-	// Commit transaction
-	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %v", err)
-	}
+	// The Period table stays in the renamed directory
+	// No need to update it since it doesn't store the period name
 
 	return existing, nil
 }
@@ -337,16 +292,8 @@ func DeletePeriod(name string) error {
 		return fmt.Errorf("period_has_deals")
 	}
 
-	// Delete from Periods table in System.db
-	systemDB, err := GetSystemDB()
-	if err != nil {
-		return err
-	}
-	
-	_, err = systemDB.Exec("DELETE FROM Periods WHERE name = ?", name)
-	if err != nil {
-		return fmt.Errorf("failed to delete period: %v", err)
-	}
+	// Period record is in the Denchokun.db itself, so deleting the database file removes it
+	// No need to delete from System.db as Periods table no longer exists there
 
 	return nil
 }
