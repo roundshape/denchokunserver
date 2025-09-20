@@ -4,7 +4,6 @@ import (
 	"denchokun-api/handlers"
 	"denchokun-api/middleware"
 	"denchokun-api/models"
-	"encoding/json"
 	"log"
 	"os"
 
@@ -28,30 +27,41 @@ type DatabaseConfig struct {
 var config Config
 
 func loadConfig() error {
-	configFile := "config.json"
-	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		config = Config{
-			Server: ServerConfig{
-				Port: ":8080",
-				Mode: "debug",
-			},
-			Database: DatabaseConfig{
-				BasePath: "./data",
-			},
+	// デフォルト設定
+	config = Config{
+		Server: ServerConfig{
+			Port: ":8080",
+			Mode: "debug",
+		},
+		Database: DatabaseConfig{
+			BasePath: "./data",
+		},
+	}
+
+	// 環境変数から設定を取得
+	if basePath := os.Getenv("DENCHOKUN_BASEPATH"); basePath != "" {
+		config.Database.BasePath = basePath
+		log.Printf("Using base path from environment variable: %s", basePath)
+	} else {
+		log.Printf("Using default base path: %s", config.Database.BasePath)
+	}
+
+	if port := os.Getenv("DENCHOKUN_PORT"); port != "" {
+		// ポート番号だけの場合は : を付ける
+		if port[0] != ':' {
+			port = ":" + port
 		}
-		return nil
+		config.Server.Port = port
+		log.Printf("Using port from environment variable: %s", port)
+	} else {
+		log.Printf("Using default port: %s", config.Server.Port)
 	}
 
-	file, err := os.Open(configFile)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&config)
-	if err != nil {
-		return err
+	if mode := os.Getenv("DENCHOKUN_MODE"); mode != "" {
+		config.Server.Mode = mode
+		log.Printf("Using mode from environment variable: %s", mode)
+	} else {
+		log.Printf("Using default mode: %s", config.Server.Mode)
 	}
 
 	return nil
@@ -81,31 +91,44 @@ func main() {
 		log.Println("Table migration completed successfully")
 	}
 
+	// プレビューハンドラーの初期化（preview-link API用）
+	previewHandler, err := handlers.NewPreviewHandler(config.Database.BasePath)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize preview handler: %v", err)
+		// プレビュー機能は必須ではないので、エラーでも続行
+	}
+
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(middleware.LoggingMiddleware())
 	r.Use(middleware.CORSMiddleware())
 	r.Use(middleware.ErrorMiddleware())
 
-	api := r.Group("/api/v1")
+	api := r.Group("/v1/api")
 	{
 		api.GET("/health", handlers.HealthCheck)
 
 		api.GET("/periods", handlers.GetPeriods)
-		api.GET("/periods/:period", handlers.GetPeriod)
+		api.GET("/periodinfo", handlers.GetPeriod)
 		api.POST("/periods", handlers.CreatePeriod)
-		api.PUT("/periods/:period/dates", handlers.UpdatePeriodDates)
-		api.PUT("/periods/:period/name", handlers.UpdatePeriodName)
-		api.POST("/periods/:period/connect", handlers.ConnectPeriod)
+		api.PUT("/periods/dates", handlers.UpdatePeriodDates)
+		api.PUT("/periods/name", handlers.UpdatePeriodName)
+		api.POST("/periods/connect", handlers.ConnectPeriod)
 
 		api.POST("/deals", handlers.CreateDeal)
 		api.GET("/deals", handlers.GetDeals)
+		api.POST("/all-deals", handlers.GetAllDeals)
 		api.GET("/deals/:dealId", handlers.GetDeal)
 		api.PUT("/deals/:dealId", handlers.UpdateDeal)
+		api.PUT("/deals/:dealId/to-otherperiod", handlers.ChangeDealPeriod)
 		api.DELETE("/deals/:dealId", handlers.DeleteDeal)
+		api.GET("/deals/:dealId/download", handlers.DownloadDealFile)
 
-		api.POST("/files", handlers.UploadFile)
-		api.GET("/files/:fileId", handlers.DownloadFile)
+		// プレビューAPI（別サーバーへのリンクを返す）
+		if previewHandler != nil {
+			// 取引のプレビューリンクを取得
+			api.GET("/preview-link", previewHandler.GetDealPreviewLink)
+		}
 
 		api.GET("/deal-partners", handlers.GetDealPartners)
 		api.POST("/deal-partners", handlers.CreateDealPartner)

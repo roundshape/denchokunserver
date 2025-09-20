@@ -46,23 +46,43 @@ go build -o denchokun-server.exe
 
 ## 設定
 
-`config.json`ファイルで以下の設定が可能です：
+### 環境変数による設定
 
-```json
-{
-  "server": {
-    "port": ":8080",
-    "mode": "debug"
-  },
-  "database": {
-    "basePath": "./data"
-  }
-}
+サーバーの設定は以下の環境変数で行います：
+
+| 環境変数 | 説明 | デフォルト値 |
+|----------|------|-------------|
+| `DENCHOKUN_BASEPATH` | データベースファイルの保存先（絶対パス） | `./data` |
+| `DENCHOKUN_PORT` | サーバーのポート番号 | `:8080` |
+| `DENCHOKUN_MODE` | 実行モード（debug/release） | `debug` |
+
+#### Windows での設定例
+```batch
+set DENCHOKUN_BASEPATH=C:\Users\motoi\DenchokunData
+set DENCHOKUN_PORT=:9000
+set DENCHOKUN_MODE=release
+denchokun-api.exe
 ```
 
-- `port`: サーバーのポート番号
-- `mode`: 実行モード（"debug" または "release"）
-- `basePath`: データベースファイルの保存先ディレクトリ
+#### Linux/macOS での設定例
+```bash
+export DENCHOKUN_BASEPATH=/home/user/denchokun-data
+export DENCHOKUN_PORT=:9000
+export DENCHOKUN_MODE=release
+./denchokun-api
+```
+
+#### 複数のサーバーで同じデータディレクトリを使用する場合
+```batch
+REM プレビューサーバーと同じデータを共有
+set DENCHOKUN_BASEPATH=C:\SharedData\Denchokun
+set DENCHOKUN_PORT=:8080
+start denchokun-api.exe
+
+REM 別のポートで2つ目のサーバーを起動
+set DENCHOKUN_PORT=:8081
+start denchokun-api.exe
+```
 
 ## API エンドポイント
 

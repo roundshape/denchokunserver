@@ -1,9 +1,0 @@
-{
-  "server": {
-    "port": ":8080",
-    "mode": "debug"
-  },
-  "database": {
-    "basePath": "./data"
-  }
-}

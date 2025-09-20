@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -232,10 +233,17 @@ func UpdatePeriod(periodName string, req *PeriodUpdateRequest) (*Period, error) 
 
 // RenamePeriod renames a period (changes its directory name)
 func RenamePeriod(oldName string, newName string) (*Period, error) {
-	// Validate new name format
-	nameRegex := regexp.MustCompile(`^\d{4}-\d{2}$`)
-	if !nameRegex.MatchString(newName) {
-		return nil, fmt.Errorf("new period name should follow YYYY-MM format (e.g., 2024-01)")
+	// Validate new name - allow any non-empty string
+	if newName == "" {
+		return nil, fmt.Errorf("new period name cannot be empty")
+	}
+	
+	// Check for invalid file system characters
+	invalidChars := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
+	for _, char := range invalidChars {
+		if strings.Contains(newName, char) {
+			return nil, fmt.Errorf("period name cannot contain special characters: %s", char)
+		}
 	}
 
 	// Check if new name already exists
@@ -244,10 +252,15 @@ func RenamePeriod(oldName string, newName string) (*Period, error) {
 		return nil, fmt.Errorf("period %s already exists", newName)
 	}
 
-	// Get existing period
+	// Get existing period before closing DB
 	existing, err := GetPeriodByName(oldName)
 	if err != nil {
 		return nil, err
+	}
+
+	// Close database connection before renaming directory
+	if err := ClosePeriodDB(oldName); err != nil {
+		return nil, fmt.Errorf("failed to close database connection: %v", err)
 	}
 
 	// Rename directory
@@ -304,10 +317,12 @@ func ValidatePeriodRequest(req *PeriodRequest) error {
 		return fmt.Errorf("period name is required")
 	}
 
-	// Validate name format (YYYY-MM recommended)
-	nameRegex := regexp.MustCompile(`^\d{4}-\d{2}$`)
-	if !nameRegex.MatchString(req.Name) {
-		return fmt.Errorf("period name should follow YYYY-MM format (e.g., 2024-01)")
+	// Check for invalid file system characters
+	invalidChars := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
+	for _, char := range invalidChars {
+		if strings.Contains(req.Name, char) {
+			return fmt.Errorf("period name cannot contain special characters: %s", char)
+		}
 	}
 
 	// Validate date formats

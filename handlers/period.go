@@ -26,7 +26,7 @@ func GetPeriods(c *gin.Context) {
 }
 
 func GetPeriod(c *gin.Context) {
-	period := c.Param("period")
+	period := c.Query("period")
 	if period == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -61,7 +61,7 @@ func GetPeriod(c *gin.Context) {
 }
 
 func ConnectPeriod(c *gin.Context) {
-	period := c.Param("period")
+	period := c.Query("period")
 	if period == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -128,7 +128,7 @@ func CreatePeriod(c *gin.Context) {
 
 // UpdatePeriodDates updates a specific period's dates
 func UpdatePeriodDates(c *gin.Context) {
-	periodName := c.Param("period")
+	periodName := c.Query("period")
 	if periodName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -188,7 +188,7 @@ func UpdatePeriodDates(c *gin.Context) {
 
 // UpdatePeriodName updates a period's name
 func UpdatePeriodName(c *gin.Context) {
-	periodName := c.Param("period")
+	periodName := c.Query("period")
 	if periodName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,

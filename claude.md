@@ -62,7 +62,7 @@ CREATE TABLE DealPartners (
 
 ### ベースURL
 ```
-http://localhost:8080/api/v1
+http://localhost:8080/v1/api
 ```
 
 ### 1. ヘルスチェック
@@ -226,6 +226,87 @@ http://localhost:8080/api/v1
 
 #### `GET /files/{fileId}`
 **説明**: ファイルのダウンロード
+
+#### `GET /v1/api/deals/{period}/{dealId}/preview`
+**説明**: 取引に紐づくファイルのプレビュー画像を取得
+
+**パラメータ**:
+- `period`: 期間名（パスパラメータ）
+- `dealId`: 取引番号（パスパラメータ）
+- `width`: プレビュー画像の幅（クエリパラメータ、オプション、デフォルト: 300）
+- `height`: プレビュー画像の高さ（クエリパラメータ、オプション、デフォルト: 300）
+
+**例**: `/v1/api/deals/2024-01/D240115001/preview?width=200`
+
+**レスポンス**:
+- **成功時**: 画像データ（image/jpeg または image/png）
+- **Content-Type**: `image/jpeg` または `image/png`
+- **キャッシュヘッダー**: `Cache-Control: max-age=86400`（24時間）
+
+**エラーレスポンス**:
+```json
+{
+    "success": false,
+    "error": "file_not_found",
+    "message": "File not found or not accessible"
+}
+```
+
+**対応ファイル形式**:
+- **画像**: JPG, JPEG, PNG, GIF, BMP, WEBP
+- **PDF**: 指定ページの画像化
+- **その他**: サムネイル生成不可の場合はデフォルトアイコン画像を返す
+
+#### `GET /v1/api/deals/{period}/{dealId}/preview-link`
+**説明**: 取引のプレビューURLを取得
+
+**パラメータ**:
+- `period`: 期間名（パスパラメータ）
+- `dealId`: 取引番号（パスパラメータ）
+- `width`: プレビュー画像の幅（クエリパラメータ、オプション）
+- `height`: プレビュー画像の高さ（クエリパラメータ、オプション）
+- その他のクエリパラメータもそのまま転送
+
+**例**: `/v1/api/deals/2024-01/D240115001/preview-link?width=300&height=300`
+
+**レスポンス**:
+```json
+{
+    "success": true,
+    "url": "{$DENCHOKUN_PREVIEW_HOST}/v1/api/deals/2024-01/D240115001/preview?width=300&height=300"
+}
+```
+
+**環境変数**:
+- `DENCHOKUN_PREVIEW_HOST`: プレビューサーバーのホスト（デフォルト: `http://localhost:8080`）
+
+### プレビュー画像生成仕様
+
+#### 画像ファイルの処理
+1. **リサイズ**: 指定サイズに縮小（アスペクト比維持）
+2. **フォーマット**: JPEG形式で出力（品質: 80%）
+3. **最大サイズ**: 幅・高さとも最大1000px
+4. **キャッシュ**: 生成したプレビューは一時キャッシュ
+
+#### PDFファイルの処理
+1. **ページ抽出**: 指定ページ（デフォルト: 1ページ目）
+2. **画像化**: 72dpi or 150dpiで画像化
+3. **リサイズ**: 指定サイズに調整
+4. **フォーマット**: PNG形式で出力
+
+#### キャッシュ戦略
+```
+/cache/previews/
+├── {period}/
+│   ├── {dealId}_{width}x{height}_p{page}.jpg
+│   └── ...
+```
+
+#### パフォーマンス考慮事項
+1. **非同期生成**: 初回アクセス時に生成、以降はキャッシュから配信
+2. **キャッシュ有効期限**: 24時間
+3. **同時生成制限**: 同一ファイルの重複生成を防止
+4. **メモリ制限**: 大きな画像は段階的に処理
 
 ### 5. マスタデータ管理
 
@@ -509,7 +590,7 @@ go get github.com/google/uuid
 
 #### 1.1 サーバー稼働確認
 ```
-GET /api/v1/health
+GET /v1/api/health
 ```
 - **理由**: サーバーとの基本的な通信確認
 - **テスト**: APIClientClass.TestConnection() の実装
@@ -517,8 +598,8 @@ GET /api/v1/health
 
 #### 1.2 期間管理
 ```
-GET /api/v1/periods
-POST /api/v1/periods/{period}/connect
+GET /v1/api/periods
+POST /v1/api/periods/{period}/connect
 ```
 - **理由**: メイン画面の期間プルダウン表示に必要
 - **テスト**: ReCreateDealPeriodPopupMenu() の動作確認
@@ -528,7 +609,7 @@ POST /api/v1/periods/{period}/connect
 
 #### 2.1 取引データ登録
 ```
-POST /api/v1/deals
+POST /v1/api/deals
 ```
 - **理由**: アプリの主要機能、ファイルアップロード含む
 - **テスト**: MainWindow の登録ボタン動作確認
@@ -537,7 +618,7 @@ POST /api/v1/deals
 
 #### 2.2 取引データ検索・取得
 ```
-GET /api/v1/deals
+GET /v1/api/deals
 ```
 - **理由**: 登録したデータの表示・確認
 - **テスト**: DealPeriodWindow の一覧表示
@@ -547,10 +628,10 @@ GET /api/v1/deals
 
 #### 3.1 取引先マスタ管理
 ```
-GET /api/v1/deal-partners
-POST /api/v1/deal-partners
-PUT /api/v1/deal-partners/{id}
-DELETE /api/v1/deal-partners/{id}
+GET /v1/api/deal-partners
+POST /v1/api/deal-partners
+PUT /v1/api/deal-partners/{id}
+DELETE /v1/api/deal-partners/{id}
 ```
 - **理由**: 取引先入力の利便性向上
 - **テスト**: DealPartnersMasterWindow の動作確認
@@ -558,8 +639,8 @@ DELETE /api/v1/deal-partners/{id}
 
 #### 3.2 取引データ更新・削除
 ```
-PUT /api/v1/deals/{dealId}
-DELETE /api/v1/deals/{dealId}
+PUT /v1/api/deals/{dealId}
+DELETE /v1/api/deals/{dealId}
 ```
 - **理由**: データメンテナンス機能
 - **テスト**: 既存データの修正・削除操作
@@ -569,7 +650,7 @@ DELETE /api/v1/deals/{dealId}
 
 #### 4.1 ファイルダウンロード
 ```
-GET /api/v1/files/{fileId}
+GET /v1/api/files/{fileId}
 ```
 - **理由**: 登録済みファイルの表示・確認
 - **テスト**: DetailWindow でのファイル表示
@@ -577,7 +658,7 @@ GET /api/v1/files/{fileId}
 
 #### 4.2 大容量ファイルアップロード
 ```
-POST /api/v1/files
+POST /v1/api/files
 ```
 - **理由**: 10MB超のファイル対応
 - **テスト**: 大きなPDFファイルの登録
@@ -587,7 +668,7 @@ POST /api/v1/files
 
 #### 5.1 高度な検索機能
 ```
-GET /api/v1/deals?keyword=XXX&date_range=XXX
+GET /v1/api/deals?keyword=XXX&date_range=XXX
 ```
 - **理由**: 業務効率化
 - **テスト**: 複雑な検索条件での絞り込み
@@ -621,21 +702,21 @@ GET /api/v1/deals?keyword=XXX&date_range=XXX
 #### フェーズ1テスト
 ```bash
 # ヘルスチェック
-curl http://localhost:8080/api/v1/health
+curl http://localhost:8080/v1/api/health
 
 # 期間一覧
-curl http://localhost:8080/api/v1/periods
+curl http://localhost:8080/v1/api/periods
 ```
 
 #### フェーズ2テスト
 ```bash
 # 取引登録（サンプルデータ）
-curl -X POST http://localhost:8080/api/v1/deals \
+curl -X POST http://localhost:8080/v1/api/deals \
   -H "Content-Type: application/json" \
   -d '{"period":"2024-01","dealData":{...}}'
 
 # 取引検索
-curl "http://localhost:8080/api/v1/deals?period=2024-01"
+curl "http://localhost:8080/v1/api/deals?period=2024-01"
 ```
 
 ### 優先順位の理由
@@ -742,7 +823,7 @@ INSERT INTO Periods VALUES
 
 #### 新規API エンドポイント
 
-#### `GET /periods/{period}`
+#### `GET /periodinfo/{period}`
 **説明**: 指定期間の詳細情報を取得
 
 **パラメータ**:

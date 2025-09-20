@@ -174,12 +174,20 @@ func ConnectToPeriod(period string) error {
 
 	periodPath := filepath.Join(basePath, period)
 	fmt.Printf("ConnectToPeriod: Period path: %s\n", periodPath)
-	if err := os.MkdirAll(periodPath, 0755); err != nil {
-		return fmt.Errorf("failed to create period directory: %v", err)
+	
+	// Create period directory if it doesn't exist
+	if _, err := os.Stat(periodPath); os.IsNotExist(err) {
+		fmt.Printf("ConnectToPeriod: Creating period directory: %s\n", periodPath)
+		if err := os.MkdirAll(periodPath, 0755); err != nil {
+			return fmt.Errorf("failed to create period directory: %v", err)
+		}
 	}
 
 	dbPath := filepath.Join(periodPath, "Denchokun.db")
 	fmt.Printf("ConnectToPeriod: Database path: %s\n", dbPath)
+	
+	// Database will be created if it doesn't exist (SQLite behavior)
+	
 	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=30000")
 	if err != nil {
 		return fmt.Errorf("failed to open database: %v", err)
