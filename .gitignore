@@ -84,6 +84,8 @@ coverage.out
 test.json
 test*.json
 *.test.json
+test*.sh
+*.sh
 
 # Build artifacts
 build/
