@@ -177,7 +177,20 @@ func CreateDeal(c *gin.Context) {
 			})
 			return
 		}
-		
+
+		// Validate file data consistency
+		if req.FileData != nil {
+			// Check if size is declared but no data provided
+			if req.FileData.Size > 0 && req.FileData.Base64Data == "" {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"success": false,
+					"error":   "invalid_file_data",
+					"message": fmt.Sprintf("File size is %d bytes but no base64 data provided", req.FileData.Size),
+				})
+				return
+			}
+		}
+
 		// If base64 file data is provided in JSON
 		if req.FileData != nil && req.FileData.Base64Data != "" {
 			var err error
@@ -227,20 +240,21 @@ func CreateDeal(c *gin.Context) {
 		req.DealData.Hash = hex.EncodeToString(hash[:])
 		log.Printf("CreateDeal: File hash calculated: %s", req.DealData.Hash)
 
-		// Generate file path if not provided
+		// Always generate file path with server-generated deal number
+		// Ignore client-provided path to ensure consistency
 		var filePath string
-		if req.FileData != nil && req.FileData.Path != "" {
-			filePath = req.FileData.Path
-		} else {
-			ext := filepath.Ext(fileName)
-			generatedFileName := fmt.Sprintf("%s_%s_%s_%d%s",
-				req.DealData.NO,
-				req.DealData.DealDate,
-				strings.ReplaceAll(req.DealData.DealPartner, "/", "_"),
-				req.DealData.DealPrice,
-				ext)
-			filePath = generatedFileName
+		ext := filepath.Ext(fileName)
+		if ext == "" && req.FileData != nil && req.FileData.Path != "" {
+			// Extract extension from client path if fileName doesn't have one
+			ext = filepath.Ext(req.FileData.Path)
 		}
+		generatedFileName := fmt.Sprintf("%s_%s_%s_%d%s",
+			req.DealData.NO,
+			req.DealData.DealDate,
+			strings.ReplaceAll(req.DealData.DealPartner, "/", "_"),
+			req.DealData.DealPrice,
+			ext)
+		filePath = generatedFileName
 		log.Printf("CreateDeal: Generated file path: %s", filePath)
 
 		// Ensure period directory exists
@@ -651,7 +665,20 @@ func UpdateDeal(c *gin.Context) {
 			})
 			return
 		}
-		
+
+		// Validate file data consistency
+		if req.FileData != nil {
+			// Check if size is declared but no data provided
+			if req.FileData.Size > 0 && req.FileData.Base64Data == "" {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"success": false,
+					"error":   "invalid_file_data",
+					"message": fmt.Sprintf("File size is %d bytes but no base64 data provided", req.FileData.Size),
+				})
+				return
+			}
+		}
+
 		// If period is empty in JSON data, try to get it from query parameter
 		if req.Period == "" {
 			req.Period = c.Query("period")
@@ -726,27 +753,21 @@ func UpdateDeal(c *gin.Context) {
 		req.DealData.Hash = hex.EncodeToString(hash[:])
 		log.Printf("UpdateDeal: File hash calculated: %s", req.DealData.Hash)
 
-		// Generate file path with new deal number
+		// Always generate file path with server-generated deal number
+		// Ignore client-provided path to ensure consistency
 		var filePath string
-		if req.FileData != nil && req.FileData.Path != "" {
-			// If custom path provided, update it with new deal number
-			ext := filepath.Ext(req.FileData.Path)
-			baseName := strings.TrimSuffix(filepath.Base(req.FileData.Path), ext)
-			// Replace the old deal number with new one in the filename
-			if strings.HasPrefix(baseName, dealID) {
-				baseName = strings.Replace(baseName, dealID, newDealNo, 1)
-			}
-			filePath = baseName + ext
-		} else {
-			ext := filepath.Ext(fileName)
-			generatedFileName := fmt.Sprintf("%s_%s_%s_%d%s",
-				newDealNo,
-				req.DealData.DealDate,
-				strings.ReplaceAll(req.DealData.DealPartner, "/", "_"),
-				req.DealData.DealPrice,
-				ext)
-			filePath = generatedFileName
+		ext := filepath.Ext(fileName)
+		if ext == "" && req.FileData != nil && req.FileData.Path != "" {
+			// Extract extension from client path if fileName doesn't have one
+			ext = filepath.Ext(req.FileData.Path)
 		}
+		generatedFileName := fmt.Sprintf("%s_%s_%s_%d%s",
+			newDealNo,
+			req.DealData.DealDate,
+			strings.ReplaceAll(req.DealData.DealPartner, "/", "_"),
+			req.DealData.DealPrice,
+			ext)
+		filePath = generatedFileName
 		log.Printf("UpdateDeal: Generated file path: %s", filePath)
 
 		// Ensure period directory exists
