@@ -38,10 +38,15 @@ func GetAllPeriodsWithDetails() ([]Period, error) {
 	// First get directories that have Denchokun.db
 	availablePeriods, err := GetAvailablePeriods()
 	if err != nil {
-		return nil, err
+		return []Period{}, err
 	}
 
-	var periods []Period
+	// 期間が存在しない場合は空の配列を返す
+	if len(availablePeriods) == 0 {
+		return []Period{}, nil
+	}
+
+	periods := make([]Period, 0, len(availablePeriods))
 	for _, periodName := range availablePeriods {
 		// Try to get period details from Periods table
 		period, err := GetPeriodByName(periodName)
@@ -305,8 +310,16 @@ func DeletePeriod(name string) error {
 		return fmt.Errorf("period_has_deals")
 	}
 
-	// Period record is in the Denchokun.db itself, so deleting the database file removes it
-	// No need to delete from System.db as Periods table no longer exists there
+	// Close database connection before deleting directory
+	if err := ClosePeriodDB(name); err != nil {
+		return fmt.Errorf("failed to close database connection: %v", err)
+	}
+
+	// Delete the period directory
+	periodPath := filepath.Join(GetBasePath(), name)
+	if err := os.RemoveAll(periodPath); err != nil {
+		return fmt.Errorf("failed to delete period directory: %v", err)
+	}
 
 	return nil
 }

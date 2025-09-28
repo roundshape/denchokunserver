@@ -99,6 +99,10 @@ func main() {
 	}
 
 	r := gin.New()
+
+	// 信頼するプロキシを設定（ローカル開発用）
+	r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
+
 	r.Use(gin.Recovery())
 	r.Use(middleware.LoggingMiddleware())
 	r.Use(middleware.CORSMiddleware())
@@ -113,6 +117,7 @@ func main() {
 		api.POST("/periods", handlers.CreatePeriod)
 		api.PUT("/periods/dates", handlers.UpdatePeriodDates)
 		api.PUT("/periods/name", handlers.UpdatePeriodName)
+		api.DELETE("/periods", handlers.DeletePeriod)
 		api.POST("/periods/connect", handlers.ConnectPeriod)
 
 		api.POST("/deals", handlers.CreateDeal)

@@ -19,6 +19,17 @@ func GetPeriods(c *gin.Context) {
 		return
 	}
 
+	// 期間が存在しない場合はsuccessをfalseにする
+	if len(periods) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"error":   "no_periods",
+			"message": "No periods available",
+			"periods": periods,
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"periods": periods,
@@ -242,6 +253,48 @@ func UpdatePeriodName(c *gin.Context) {
 		"success": true,
 		"message": "Period renamed successfully",
 		"period":  period,
+	})
+}
+
+// DeletePeriod deletes a period if it has no deals
+func DeletePeriod(c *gin.Context) {
+	periodName := c.Query("period")
+	if periodName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "invalid_request",
+			"message": "Period parameter is required",
+		})
+		return
+	}
+
+	err := models.DeletePeriod(periodName)
+	if err != nil {
+		if strings.Contains(err.Error(), "period_has_deals") {
+			c.JSON(http.StatusConflict, gin.H{
+				"success": false,
+				"error":   "period_has_deals",
+				"message": "Cannot delete period that contains deal records",
+			})
+		} else if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "connect") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"error":   "period_not_found",
+				"message": "Period not found: " + periodName,
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"error":   "delete_error",
+				"message": err.Error(),
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Period deleted successfully",
 	})
 }
 
